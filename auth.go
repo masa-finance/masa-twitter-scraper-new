@@ -8,48 +8,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
-)
 
-const (
-	loginURL          = "https://api.twitter.com/1.1/onboarding/task.json"
-	logoutURL         = "https://api.twitter.com/1.1/account/logout.json"
-	oAuthURL          = "https://api.twitter.com/oauth2/token"
-	bearerToken2      = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
-	appConsumerKey    = "3nVuSoBZnx6U4vzUxf5w"
-	appConsumerSecret = "Bcs59EFbbsdF6Sl9Ng71smgStWEGwXXKSjYvPVt7qys"
-)
-
-type (
-	OpenAccount struct {
-		OAuthToken       string `json:"oauth_token"`
-		OAuthTokenSecret string `json:"oauth_token_secret"`
-	}
-
-	flow struct {
-		Errors []struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		} `json:"errors"`
-		FlowToken string `json:"flow_token"`
-		Status    string `json:"status"`
-		Subtasks  []struct {
-			SubtaskID   string      `json:"subtask_id"`
-			OpenAccount OpenAccount `json:"open_account"`
-		} `json:"subtasks"`
-	}
-
-	verifyCredentials struct {
-		Errors []struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		} `json:"errors"`
-	}
+	"github.com/sirupsen/logrus"
 )
 
 func (s *Scraper) getAccessToken(consumerKey, consumerSecret string) (string, error) {
@@ -58,6 +25,7 @@ func (s *Scraper) getAccessToken(consumerKey, consumerSecret string) (string, er
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
 	req.SetBasicAuth(consumerKey, consumerSecret)
 
 	res, err := s.client.Do(req)
@@ -82,9 +50,9 @@ func (s *Scraper) getAccessToken(consumerKey, consumerSecret string) (string, er
 
 func (s *Scraper) getFlow(data map[string]interface{}) (*flow, error) {
 	headers := http.Header{
-		"Authorization":             []string{"Bearer " + s.bearerToken},
-		"Content-Type":              []string{"application/json"},
-		"User-Agent":                []string{"TwitterAndroid/99"},
+		"Authorization": []string{"Bearer " + s.bearerToken},
+		"Content-Type":  []string{"application/json"},
+		//"User-Agent":                []string{GetRandomUserAgent()},
 		"X-Guest-Token":             []string{s.guestToken},
 		"X-Twitter-Auth-Type":       []string{"OAuth2Client"},
 		"X-Twitter-Active-User":     []string{"yes"},
@@ -101,15 +69,31 @@ func (s *Scraper) getFlow(data map[string]interface{}) (*flow, error) {
 	}
 	req.Header = headers
 
+	// Set CSRF token
+	//s.setCSRFToken(req)
+
 	resp, err := s.client.Do(req)
 	if err != nil {
+		logrus.WithError(err).Error("Failed to execute request")
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	var info flow
-	err = json.NewDecoder(resp.Body).Decode(&info)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		logrus.WithError(err).Error("Failed to read response body")
+		return nil, err
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"status_code": resp.StatusCode,
+		"body":        string(body),
+	}).Debug("Received response from Twitter API")
+
+	var info flow
+	err = json.Unmarshal(body, &info)
+	if err != nil {
+		logrus.WithError(err).Error("Failed to unmarshal response body")
 		return nil, err
 	}
 
@@ -123,21 +107,23 @@ func (s *Scraper) getFlowToken(data map[string]interface{}) (string, error) {
 	}
 
 	if len(info.Errors) > 0 {
+		logrus.WithFields(logrus.Fields{
+			"error_code":    info.Errors[0].Code,
+			"error_message": info.Errors[0].Message,
+		}).Error("Auth error returned by Twitter API")
 		return "", fmt.Errorf("auth error (%d): %v", info.Errors[0].Code, info.Errors[0].Message)
 	}
 
 	if info.Subtasks != nil && len(info.Subtasks) > 0 {
-		if info.Subtasks[0].SubtaskID == "LoginEnterAlternateIdentifierSubtask" {
-			err = fmt.Errorf("auth error: %v", "LoginEnterAlternateIdentifierSubtask")
-		} else if info.Subtasks[0].SubtaskID == "LoginAcid" {
-			err = fmt.Errorf("auth error: %v", "LoginAcid")
-		} else if info.Subtasks[0].SubtaskID == "LoginTwoFactorAuthChallenge" {
-			err = fmt.Errorf("auth error: %v", "LoginTwoFactorAuthChallenge")
-		} else if info.Subtasks[0].SubtaskID == "DenyLoginSubtask" {
-			err = fmt.Errorf("auth error: %v", "DenyLoginSubtask")
+		subtaskID := info.Subtasks[0].SubtaskID
+		logrus.WithField("subtask_id", subtaskID).Debug("Received subtask from Twitter API")
+
+		switch subtaskID {
+		case "LoginEnterAlternateIdentifierSubtask", "LoginAcid", "LoginTwoFactorAuthChallenge", "DenyLoginSubtask":
+			err = fmt.Errorf("auth error: %v", subtaskID)
+			logrus.WithError(err).Error("Authentication failed")
 		}
 	}
-
 	return info.FlowToken, err
 }
 
@@ -145,7 +131,7 @@ func (s *Scraper) getFlowToken(data map[string]interface{}) (string, error) {
 func (s *Scraper) IsLoggedIn() bool {
 	s.isLogged = true
 	s.setBearerToken(bearerToken2)
-	req, err := http.NewRequest("GET", "https://api.twitter.com/1.1/account/verify_credentials.json", nil)
+	req, err := http.NewRequest("GET", verifyCredentialsURL, nil)
 	if err != nil {
 		return false
 	}
@@ -158,6 +144,12 @@ func (s *Scraper) IsLoggedIn() bool {
 		s.isLogged = true
 	}
 	return s.isLogged
+}
+
+// randomDelay introduces a random delay between 1 and 3 seconds
+func randomDelay() {
+	delay := time.Duration(3000+rand.Intn(5000)) * time.Millisecond
+	time.Sleep(delay)
 }
 
 // Login to Twitter
@@ -175,12 +167,30 @@ func (s *Scraper) Login(credentials ...string) error {
 		confirmation = credentials[2]
 	}
 
-	s.setBearerToken(bearerToken2)
-
-	err := s.GetGuestToken()
+	// Initialize cookies by making a request to twitter.com
+	req, err := http.NewRequest("GET", "https://twitter.com/", nil)
 	if err != nil {
 		return err
 	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	s.setBearerToken(bearerToken2)
+
+	err = s.GetGuestToken()
+	if err != nil {
+		return err
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"username":     username,
+		"confirmation": confirmation != "",
+	}).Info("Attempting to log in")
+
+	randomDelay()
 
 	// flow start
 	data := map[string]interface{}{
@@ -194,8 +204,11 @@ func (s *Scraper) Login(credentials ...string) error {
 	}
 	flowToken, err := s.getFlowToken(data)
 	if err != nil {
+		logrus.WithError(err).Error("Failed to get initial flow token")
 		return err
 	}
+
+	randomDelay()
 
 	// flow instrumentation step
 	data = map[string]interface{}{
@@ -211,6 +224,8 @@ func (s *Scraper) Login(credentials ...string) error {
 	if err != nil {
 		return err
 	}
+
+	randomDelay()
 
 	// flow username step
 	data = map[string]interface{}{
@@ -235,6 +250,8 @@ func (s *Scraper) Login(credentials ...string) error {
 		return err
 	}
 
+	randomDelay()
+
 	// flow password step
 	data = map[string]interface{}{
 		"flow_token": flowToken,
@@ -250,6 +267,8 @@ func (s *Scraper) Login(credentials ...string) error {
 		return err
 	}
 
+	randomDelay()
+
 	// flow duplication check
 	data = map[string]interface{}{
 		"flow_token": flowToken,
@@ -262,6 +281,7 @@ func (s *Scraper) Login(credentials ...string) error {
 	}
 	flowToken, err = s.getFlowToken(data)
 	if err != nil {
+		logrus.WithError(err).Error("Error during account duplication check")
 		var confirmationSubtask string
 		for _, subtask := range []string{"LoginAcid", "LoginTwoFactorAuthChallenge"} {
 			if strings.Contains(err.Error(), subtask) {
@@ -271,8 +291,10 @@ func (s *Scraper) Login(credentials ...string) error {
 		}
 		if confirmationSubtask != "" {
 			if confirmation == "" {
+				logrus.WithField("subtask", confirmationSubtask).Error("Confirmation data required but not provided")
 				return fmt.Errorf("confirmation data required for %v", confirmationSubtask)
 			}
+			randomDelay()
 			// flow confirmation
 			data = map[string]interface{}{
 				"flow_token": flowToken,
@@ -285,6 +307,7 @@ func (s *Scraper) Login(credentials ...string) error {
 			}
 			_, err = s.getFlowToken(data)
 			if err != nil {
+				logrus.WithError(err).Error("Failed to complete confirmation flow")
 				return err
 			}
 		} else {
@@ -292,22 +315,25 @@ func (s *Scraper) Login(credentials ...string) error {
 		}
 	}
 
+	randomDelay()
+
 	s.isLogged = true
 	s.isOpenAccount = false
+	logrus.Info("Successfully logged in")
 	return nil
 }
 
 // LoginOpenAccount as Twitter app
-func (s *Scraper) LoginOpenAccount() (OpenAccount, error) {
+func (s *Scraper) LoginOpenAccount() error {
 	accessToken, err := s.getAccessToken(appConsumerKey, appConsumerSecret)
 	if err != nil {
-		return OpenAccount{}, err
+		return err
 	}
 	s.setBearerToken(accessToken)
 
 	err = s.GetGuestToken()
 	if err != nil {
-		return OpenAccount{}, err
+		return err
 	}
 
 	// flow start
@@ -322,7 +348,7 @@ func (s *Scraper) LoginOpenAccount() (OpenAccount, error) {
 	}
 	flowToken, err := s.getFlowToken(data)
 	if err != nil {
-		return OpenAccount{}, err
+		return err
 	}
 
 	// flow next link
@@ -336,7 +362,7 @@ func (s *Scraper) LoginOpenAccount() (OpenAccount, error) {
 	}
 	info, err := s.getFlow(data)
 	if err != nil {
-		return OpenAccount{}, err
+		return err
 	}
 
 	if info.Subtasks != nil && len(info.Subtasks) > 0 {
@@ -344,24 +370,14 @@ func (s *Scraper) LoginOpenAccount() (OpenAccount, error) {
 			s.oAuthToken = info.Subtasks[0].OpenAccount.OAuthToken
 			s.oAuthSecret = info.Subtasks[0].OpenAccount.OAuthTokenSecret
 			if s.oAuthToken == "" || s.oAuthSecret == "" {
-				return OpenAccount{}, fmt.Errorf("auth error: %v", "Token or Secret is empty")
+				return fmt.Errorf("auth error: %v", "Token or Secret is empty")
 			}
 			s.isLogged = true
 			s.isOpenAccount = true
-			return OpenAccount{
-				OAuthToken:       info.Subtasks[0].OpenAccount.OAuthToken,
-				OAuthTokenSecret: info.Subtasks[0].OpenAccount.OAuthTokenSecret,
-			}, nil
+			return nil
 		}
 	}
-	return OpenAccount{}, fmt.Errorf("auth error: %v", "OpenAccount")
-}
-
-func (s *Scraper) WithOpenAccount(openAccount OpenAccount) {
-	s.oAuthToken = openAccount.OAuthToken
-	s.oAuthSecret = openAccount.OAuthTokenSecret
-	s.isLogged = true
-	s.isOpenAccount = true
+	return fmt.Errorf("auth error: %v", "OpenAccount")
 }
 
 // Logout is reset session
@@ -403,46 +419,6 @@ func (s *Scraper) SetCookies(cookies []*http.Cookie) {
 
 func (s *Scraper) ClearCookies() {
 	s.client.Jar, _ = cookiejar.New(nil)
-}
-
-// Use auth_token cookie as Token and ct0 cookie as CSRFToken
-type AuthToken struct {
-	Token     string
-	CSRFToken string
-}
-
-// Auth using auth_token and ct0 cookies
-func (s *Scraper) SetAuthToken(token AuthToken) {
-	expires := time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC)
-	cookies := []*http.Cookie{{
-		Name:       "auth_token",
-		Value:      token.Token,
-		Path:       "",
-		Domain:     "twitter.com",
-		Expires:    expires,
-		RawExpires: "",
-		MaxAge:     0,
-		Secure:     false,
-		HttpOnly:   false,
-		SameSite:   0,
-		Raw:        "",
-		Unparsed:   nil,
-	}, {
-		Name:       "ct0",
-		Value:      token.CSRFToken,
-		Path:       "",
-		Domain:     "twitter.com",
-		Expires:    expires,
-		RawExpires: "",
-		MaxAge:     0,
-		Secure:     false,
-		HttpOnly:   false,
-		SameSite:   0,
-		Raw:        "",
-		Unparsed:   nil,
-	}}
-
-	s.SetCookies(cookies)
 }
 
 func (s *Scraper) sign(method string, ref *url.URL) string {
