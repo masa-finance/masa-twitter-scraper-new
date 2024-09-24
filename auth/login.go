@@ -43,11 +43,10 @@ type LoginFlow struct {
 	// Add other necessary fields
 }
 
-func NewLoginFlow(client *httpwrap.Client, bearerToken, guestToken, username, password, confirmation string) *LoginFlow {
+func NewLoginFlow(client *httpwrap.Client, bearerToken, username, password, confirmation string) *LoginFlow {
 	return &LoginFlow{
 		Client:       client,
 		BearerToken:  bearerToken,
-		GuestToken:   guestToken,
 		Username:     username,
 		Password:     password,
 		Confirmation: confirmation,
@@ -60,6 +59,7 @@ func (lf *LoginFlow) Validate() bool {
 
 func (lf *LoginFlow) setBearerToken(token string) (err error) {
 	lf.BearerToken = token
+	lf.Client.WithBearerToken(lf.BearerToken)
 	lf.GuestToken = ""
 	lf.GuestToken, err = GetGuestToken(lf.Client, lf.BearerToken)
 	if err != nil {
@@ -126,6 +126,11 @@ func (lf *LoginFlow) Start() error {
 		return err
 	}
 	randomDelay()
+
+	err = lf.setBearerToken(lf.BearerToken)
+	if err != nil {
+		return err
+	}
 
 	flowToken, err := lf.startLoginFlow()
 	if err != nil {
@@ -384,7 +389,7 @@ func (lf *LoginFlow) getFlow(data map[string]interface{}) (*types.Flow, error) {
 
 	var info types.Flow
 	// TODO: Check if the result is a pointer
-	_, err = lf.Client.Post(LoginURL, data, headers, info)
+	_, err = lf.Client.Post(LoginURL, data, headers, &info)
 	if err != nil {
 		return nil, err
 	}

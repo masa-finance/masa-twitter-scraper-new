@@ -159,6 +159,7 @@ func randomDelay() {
 // or Login(username, password, code_for_2FA) for login if you have two-factor authentication
 func (s *Scraper) Login(credentials ...string) error {
 	var username, password, confirmation string
+	var err error
 	if len(credentials) < 2 || len(credentials) > 3 {
 		return fmt.Errorf("invalid credentials")
 	}
@@ -167,23 +168,18 @@ func (s *Scraper) Login(credentials ...string) error {
 	if len(credentials) == 3 {
 		confirmation = credentials[2]
 	}
-
-	s.setBearerToken(bearerToken2)
-	err := s.GetGuestToken()
-	if err != nil {
-		return err
-	}
-
 	logrus.WithFields(logrus.Fields{
 		"username":     username,
 		"confirmation": confirmation != "",
 	}).Info("Attempting to log in")
 
-	loginFlow := auth.NewLoginFlow(s.client, s.bearerToken, s.guestToken, username, password, confirmation)
+	loginFlow := auth.NewLoginFlow(s.client, bearerToken2, username, password, confirmation)
 	err = loginFlow.Start()
 	if err != nil {
 		return err
 	}
+	s.bearerToken = loginFlow.BearerToken
+	s.guestToken = loginFlow.GuestToken
 	s.isLogged = loginFlow.IsLogged
 	s.isOpenAccount = loginFlow.IsOpenAccount
 	logrus.Info("Successfully logged in")
@@ -192,59 +188,16 @@ func (s *Scraper) Login(credentials ...string) error {
 
 // LoginOpenAccount as Twitter app
 func (s *Scraper) LoginOpenAccount() error {
-	accessToken, err := s.getAccessToken(appConsumerKey, appConsumerSecret)
+	loginFlow := auth.NewLoginFlow(s.client, "", "", "", "")
+	err := loginFlow.LoginOpenAccount(appConsumerKey, appConsumerSecret)
 	if err != nil {
 		return err
 	}
-	s.setBearerToken(accessToken)
-
-	err = s.GetGuestToken()
-	if err != nil {
-		return err
-	}
-
-	// flow start
-	data := map[string]interface{}{
-		"flow_name": "welcome",
-		"input_flow_data": map[string]interface{}{
-			"flow_context": map[string]interface{}{
-				"debug_overrides": map[string]interface{}{},
-				"start_location":  map[string]interface{}{"location": "splash_screen"},
-			},
-		},
-	}
-	flowToken, err := s.getFlowToken(data)
-	if err != nil {
-		return err
-	}
-
-	// flow next link
-	data = map[string]interface{}{
-		"flow_token": flowToken,
-		"subtask_inputs": []interface{}{
-			map[string]interface{}{
-				"subtask_id": "NextTaskOpenLink",
-			},
-		},
-	}
-	info, err := s.getFlow(data)
-	if err != nil {
-		return err
-	}
-
-	if info.Subtasks != nil && len(info.Subtasks) > 0 {
-		if info.Subtasks[0].SubtaskID == "OpenAccount" {
-			s.oAuthToken = info.Subtasks[0].OpenAccount.OAuthToken
-			s.oAuthSecret = info.Subtasks[0].OpenAccount.OAuthTokenSecret
-			if s.oAuthToken == "" || s.oAuthSecret == "" {
-				return fmt.Errorf("auth error: %v", "Token or Secret is empty")
-			}
-			s.isLogged = true
-			s.isOpenAccount = true
-			return nil
-		}
-	}
-	return fmt.Errorf("auth error: %v", "OpenAccount")
+	s.setBearerToken(loginFlow.BearerToken)
+	s.guestToken = loginFlow.GuestToken
+	s.guestCreatedAt = time.Now()
+	s.isLogged = loginFlow.IsLogged
+	return nil
 }
 
 // Logout is reset session
@@ -329,42 +282,42 @@ func (s *Scraper) sign(method string, ref *url.URL) string {
 	return "OAuth " + b.String()
 }
 
-// Use auth_token cookie as Token and ct0 cookie as CSRFToken
+// AuthToken Use auth_token cookie as Token and ct0 cookie as CSRFToken
 type AuthToken struct {
 	Token     string
 	CSRFToken string
 }
 
-// Auth using auth_token and ct0 cookies
-func (s *Scraper) SetAuthToken(token AuthToken) {
-	expires := time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC)
-	cookies := []*http.Cookie{{
-		Name:       "auth_token",
-		Value:      token.Token,
-		Path:       "",
-		Domain:     "twitter.com",
-		Expires:    expires,
-		RawExpires: "",
-		MaxAge:     0,
-		Secure:     false,
-		HttpOnly:   false,
-		SameSite:   0,
-		Raw:        "",
-		Unparsed:   nil,
-	}, {
-		Name:       "ct0",
-		Value:      token.CSRFToken,
-		Path:       "",
-		Domain:     "twitter.com",
-		Expires:    expires,
-		RawExpires: "",
-		MaxAge:     0,
-		Secure:     false,
-		HttpOnly:   false,
-		SameSite:   0,
-		Raw:        "",
-		Unparsed:   nil,
-	}}
-
-	s.SetCookies(cookies)
-}
+// SetAuthToken Auth using auth_token and ct0 cookies
+//func (s *Scraper) SetAuthToken(token AuthToken) {
+//	expires := time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC)
+//	cookies := []*http.Cookie{{
+//		Name:       "auth_token",
+//		Value:      token.Token,
+//		Path:       "",
+//		Domain:     "twitter.com",
+//		Expires:    expires,
+//		RawExpires: "",
+//		MaxAge:     0,
+//		Secure:     false,
+//		HttpOnly:   false,
+//		SameSite:   0,
+//		Raw:        "",
+//		Unparsed:   nil,
+//	}, {
+//		Name:       "ct0",
+//		Value:      token.CSRFToken,
+//		Path:       "",
+//		Domain:     "twitter.com",
+//		Expires:    expires,
+//		RawExpires: "",
+//		MaxAge:     0,
+//		Secure:     false,
+//		HttpOnly:   false,
+//		SameSite:   0,
+//		Raw:        "",
+//		Unparsed:   nil,
+//	}}
+//
+//	s.SetCookies(cookies)
+//}

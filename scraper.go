@@ -49,15 +49,20 @@ const DefaultClientTimeout = 10 * time.Second
 func New() *Scraper {
 	scraper := &Scraper{
 		bearerToken: BearerToken,
-		client:      httpwrap.NewClient().WithJar().WithBearerToken(BearerToken),
+		client:      httpwrap.NewClient().WithJar(),
 	}
 	scraper.SetUserAgent(auth.GetRandomUserAgent())
 	return scraper
 }
 
+func (s *Scraper) GetHTTPClient() *httpwrap.Client {
+	return s.client
+}
+
 func (s *Scraper) setBearerToken(token string) {
 	s.bearerToken = token
 	s.guestToken = ""
+	s.client.WithBearerToken(token)
 }
 
 // SetUserAgent sets the user agent for the scraper

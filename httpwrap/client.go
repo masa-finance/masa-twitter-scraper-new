@@ -166,12 +166,11 @@ func (c *Client) Get(baseURL string, urlParams url.Values, header http.Header, o
 	if err != nil {
 		return limitCount, err
 	}
-	if obj == nil {
-		obj = make(map[string]interface{})
-	}
-	err = json.NewDecoder(respBody).Decode(&obj)
-	if err != nil {
-		return limitCount, err
+	if obj != nil {
+		err = json.NewDecoder(respBody).Decode(&obj)
+		if err != nil {
+			return limitCount, err
+		}
 	}
 	return limitCount, nil
 }
