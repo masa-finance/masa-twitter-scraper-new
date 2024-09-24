@@ -9,17 +9,19 @@ type Token struct {
 	AccessToken string `json:"access_token"`
 }
 
+type Subtask struct {
+	SubtaskID   string `json:"subtask_id"`
+	OpenAccount struct {
+		OAuthToken       string `json:"oauth_token"`
+		OAuthTokenSecret string `json:"oauth_token_secret"`
+	} `json:"open_account"`
+}
+
 type Flow struct {
-	Errors    []Error `json:"errors"`
-	FlowToken string  `json:"flow_token"`
-	Status    string  `json:"status"`
-	Subtasks  []struct {
-		SubtaskID   string `json:"subtask_id"`
-		OpenAccount struct {
-			OAuthToken       string `json:"oauth_token"`
-			OAuthTokenSecret string `json:"oauth_token_secret"`
-		} `json:"open_account"`
-	} `json:"subtasks"`
+	Errors    []Error   `json:"errors"`
+	FlowToken string    `json:"flow_token"`
+	Status    string    `json:"status"`
+	Subtasks  []Subtask `json:"subtasks"`
 }
 
 type VerifyCredentials struct {

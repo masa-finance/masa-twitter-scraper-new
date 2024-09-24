@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/joho/godotenv"
+	"github.com/sirupsen/logrus"
+
 	twitterscraper "github.com/imperatrona/twitter-scraper"
 )
 
@@ -25,6 +28,12 @@ var (
 )
 
 func init() {
+	if err := godotenv.Load(); err != nil {
+		logrus.WithError(err).Warn("Error loading .env file")
+	}
+	logrus.Infof("Loaded .env TWITTER_USER=%s", os.Getenv("TWITTER_USERNAME"))
+	logrus.Infof("Skip auth test: %v", os.Getenv("SKIP_AUTH_TEST"))
+	skipAuthTest = os.Getenv("SKIP_AUTH_TEST") != ""
 	if skipAuthTest {
 		return
 	}
@@ -50,12 +59,12 @@ func init() {
 	if username != "" && password != "" {
 		err := testScraper.Login(username, password, email)
 		if err != nil {
-			panic(fmt.Sprintf("Login() error = %v", err))
+			logrus.Fatalf("Login() error = %v", err)
 		}
 		return
 	}
 
-	skipAuthTest = true
+	//skipAuthTest = true
 	fmt.Println("None of any auth data provided, skipping all tests that requires auth")
 }
 
@@ -75,10 +84,12 @@ func newTestScraper(skip_auth bool) *twitterscraper.Scraper {
 	}
 
 	if skip_auth == true || !skipAuthTest {
-		s.ClearGuestToken()
+		err := s.ClearGuestToken()
+		if err != nil {
+			return nil
+		}
 		return s
 	}
-
 	return s
 }
 
@@ -137,8 +148,7 @@ func TestLoginOpenAccount(t *testing.T) {
 	}
 
 	scraper := twitterscraper.New()
-	_, err := scraper.LoginOpenAccount()
-
+	err := scraper.LoginOpenAccount()
 	if err != nil {
 		t.Fatalf("LoginOpenAccount() error = %v", err)
 	}

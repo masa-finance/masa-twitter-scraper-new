@@ -68,11 +68,12 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 //  6. Returns the response body and headers if the request is successful.
 func (c *Client) DoRequest(req *http.Request) (io.ReadCloser, http.Header, error) {
 	// Default Content-Type
-	if req.Header.Get("Content-Type") == "" {
-		req.Header.Set("Content-Type", "application/json")
+	if req.Header != nil {
+		if req.Header.Get("Content-Type") == "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		req.Header.Set("Accept-Encoding", "gzip, deflate, br")
 	}
-	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
-
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, nil, err
@@ -141,16 +142,19 @@ func (c *Client) Get(baseURL string, urlParams url.Values, header http.Header, o
 	if err != nil {
 		return limitCount, err
 	}
-
-	req.Header = header
+	if header != nil {
+		req.Header = header
+	}
 	respBody, respHeader, err := c.DoRequest(req)
 
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			logrus.Errorf("error closing response body: %v\n", err)
-		}
-	}(respBody)
+	if respBody != nil {
+		defer func(Body io.ReadCloser) {
+			err := Body.Close()
+			if err != nil {
+				logrus.Errorf("error closing response body: %v\n", err)
+			}
+		}(respBody)
+	}
 
 	if respHeader != nil && respHeader.Get("X-Rate-Limit-Remaining") != "" {
 		limitCount, err = strconv.Atoi(respHeader.Get("X-Rate-Limit-Remaining"))

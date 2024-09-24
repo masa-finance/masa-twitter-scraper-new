@@ -10,13 +10,14 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
+
+	"github.com/imperatrona/twitter-scraper/auth"
 )
 
 func (s *Scraper) getAccessToken(consumerKey, consumerSecret string) (string, error) {
@@ -139,7 +140,7 @@ func (s *Scraper) IsLoggedIn() bool {
 	err = s.RequestAPI(req, &verify)
 	if err != nil || verify.Errors != nil {
 		s.isLogged = false
-		s.setBearerToken(bearerToken)
+		s.setBearerToken(BearerToken)
 	} else {
 		s.isLogged = true
 	}
@@ -167,20 +168,8 @@ func (s *Scraper) Login(credentials ...string) error {
 		confirmation = credentials[2]
 	}
 
-	// Initialize cookies by making a request to twitter.com
-	req, err := http.NewRequest("GET", "https://twitter.com/", nil)
-	if err != nil {
-		return err
-	}
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
 	s.setBearerToken(bearerToken2)
-
-	err = s.GetGuestToken()
+	err := s.GetGuestToken()
 	if err != nil {
 		return err
 	}
@@ -190,135 +179,13 @@ func (s *Scraper) Login(credentials ...string) error {
 		"confirmation": confirmation != "",
 	}).Info("Attempting to log in")
 
-	randomDelay()
-
-	// flow start
-	data := map[string]interface{}{
-		"flow_name": "login",
-		"input_flow_data": map[string]interface{}{
-			"flow_context": map[string]interface{}{
-				"debug_overrides": map[string]interface{}{},
-				"start_location":  map[string]interface{}{"location": "splash_screen"},
-			},
-		},
-	}
-	flowToken, err := s.getFlowToken(data)
-	if err != nil {
-		logrus.WithError(err).Error("Failed to get initial flow token")
-		return err
-	}
-
-	randomDelay()
-
-	// flow instrumentation step
-	data = map[string]interface{}{
-		"flow_token": flowToken,
-		"subtask_inputs": []map[string]interface{}{
-			{
-				"subtask_id":         "LoginJsInstrumentationSubtask",
-				"js_instrumentation": map[string]interface{}{"response": "{}", "link": "next_link"},
-			},
-		},
-	}
-	flowToken, err = s.getFlowToken(data)
+	loginFlow := auth.NewLoginFlow(s.client, s.bearerToken, s.guestToken, username, password, confirmation)
+	err = loginFlow.Start()
 	if err != nil {
 		return err
 	}
-
-	randomDelay()
-
-	// flow username step
-	data = map[string]interface{}{
-		"flow_token": flowToken,
-		"subtask_inputs": []map[string]interface{}{
-			{
-				"subtask_id": "LoginEnterUserIdentifierSSO",
-				"settings_list": map[string]interface{}{
-					"setting_responses": []map[string]interface{}{
-						{
-							"key":           "user_identifier",
-							"response_data": map[string]interface{}{"text_data": map[string]interface{}{"result": username}},
-						},
-					},
-					"link": "next_link",
-				},
-			},
-		},
-	}
-	flowToken, err = s.getFlowToken(data)
-	if err != nil {
-		return err
-	}
-
-	randomDelay()
-
-	// flow password step
-	data = map[string]interface{}{
-		"flow_token": flowToken,
-		"subtask_inputs": []map[string]interface{}{
-			{
-				"subtask_id":     "LoginEnterPassword",
-				"enter_password": map[string]interface{}{"password": password, "link": "next_link"},
-			},
-		},
-	}
-	flowToken, err = s.getFlowToken(data)
-	if err != nil {
-		return err
-	}
-
-	randomDelay()
-
-	// flow duplication check
-	data = map[string]interface{}{
-		"flow_token": flowToken,
-		"subtask_inputs": []map[string]interface{}{
-			{
-				"subtask_id":              "AccountDuplicationCheck",
-				"check_logged_in_account": map[string]interface{}{"link": "AccountDuplicationCheck_false"},
-			},
-		},
-	}
-	flowToken, err = s.getFlowToken(data)
-	if err != nil {
-		logrus.WithError(err).Error("Error during account duplication check")
-		var confirmationSubtask string
-		for _, subtask := range []string{"LoginAcid", "LoginTwoFactorAuthChallenge"} {
-			if strings.Contains(err.Error(), subtask) {
-				confirmationSubtask = subtask
-				break
-			}
-		}
-		if confirmationSubtask != "" {
-			if confirmation == "" {
-				logrus.WithField("subtask", confirmationSubtask).Error("Confirmation data required but not provided")
-				return fmt.Errorf("confirmation data required for %v", confirmationSubtask)
-			}
-			randomDelay()
-			// flow confirmation
-			data = map[string]interface{}{
-				"flow_token": flowToken,
-				"subtask_inputs": []map[string]interface{}{
-					{
-						"subtask_id": confirmationSubtask,
-						"enter_text": map[string]interface{}{"text": confirmation, "link": "next_link"},
-					},
-				},
-			}
-			_, err = s.getFlowToken(data)
-			if err != nil {
-				logrus.WithError(err).Error("Failed to complete confirmation flow")
-				return err
-			}
-		} else {
-			return err
-		}
-	}
-
-	randomDelay()
-
-	s.isLogged = true
-	s.isOpenAccount = false
+	s.isLogged = loginFlow.IsLogged
+	s.isOpenAccount = loginFlow.IsOpenAccount
 	logrus.Info("Successfully logged in")
 	return nil
 }
@@ -396,14 +263,14 @@ func (s *Scraper) Logout() error {
 	s.guestToken = ""
 	s.oAuthToken = ""
 	s.oAuthSecret = ""
-	s.client.Jar, _ = cookiejar.New(nil)
-	s.setBearerToken(bearerToken)
+	s.client.WithJar()
+	s.setBearerToken(BearerToken)
 	return nil
 }
 
 func (s *Scraper) GetCookies() []*http.Cookie {
 	var cookies []*http.Cookie
-	for _, cookie := range s.client.Jar.Cookies(twURL) {
+	for _, cookie := range s.client.GetCookies(twURL) {
 		if strings.Contains(cookie.Name, "guest") {
 			continue
 		}
@@ -414,11 +281,11 @@ func (s *Scraper) GetCookies() []*http.Cookie {
 }
 
 func (s *Scraper) SetCookies(cookies []*http.Cookie) {
-	s.client.Jar.SetCookies(twURL, cookies)
+	s.client.SetCookies(twURL, cookies)
 }
 
 func (s *Scraper) ClearCookies() {
-	s.client.Jar, _ = cookiejar.New(nil)
+	s.client.WithJar()
 }
 
 func (s *Scraper) sign(method string, ref *url.URL) string {
@@ -460,4 +327,44 @@ func (s *Scraper) sign(method string, ref *url.URL) string {
 	}
 
 	return "OAuth " + b.String()
+}
+
+// Use auth_token cookie as Token and ct0 cookie as CSRFToken
+type AuthToken struct {
+	Token     string
+	CSRFToken string
+}
+
+// Auth using auth_token and ct0 cookies
+func (s *Scraper) SetAuthToken(token AuthToken) {
+	expires := time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC)
+	cookies := []*http.Cookie{{
+		Name:       "auth_token",
+		Value:      token.Token,
+		Path:       "",
+		Domain:     "twitter.com",
+		Expires:    expires,
+		RawExpires: "",
+		MaxAge:     0,
+		Secure:     false,
+		HttpOnly:   false,
+		SameSite:   0,
+		Raw:        "",
+		Unparsed:   nil,
+	}, {
+		Name:       "ct0",
+		Value:      token.CSRFToken,
+		Path:       "",
+		Domain:     "twitter.com",
+		Expires:    expires,
+		RawExpires: "",
+		MaxAge:     0,
+		Secure:     false,
+		HttpOnly:   false,
+		SameSite:   0,
+		Raw:        "",
+		Unparsed:   nil,
+	}}
+
+	s.SetCookies(cookies)
 }
