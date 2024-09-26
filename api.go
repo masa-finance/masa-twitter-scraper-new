@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const bearerToken string = "AAAAAAAAAAAAAAAAAAAAAPYXBAAAAAAACLXUNDekMxqa8h%2F40K4moUkGsoc%3DTYfbDKbT3jJPCEVnMYqilB28NHfOPqkca3qaAxGfsyKCs0wRbw"
+const BearerToken string = "AAAAAAAAAAAAAAAAAAAAAPYXBAAAAAAACLXUNDekMxqa8h%2F40K4moUkGsoc%3DTYfbDKbT3jJPCEVnMYqilB28NHfOPqkca3qaAxGfsyKCs0wRbw"
 
 // RequestAPI get JSON from frontend API and decodes it
 func (s *Scraper) RequestAPI(req *http.Request, target interface{}) error {
@@ -39,7 +39,7 @@ func (s *Scraper) RequestAPI(req *http.Request, target interface{}) error {
 		req.Header.Set("Authorization", "Bearer "+s.bearerToken)
 	}
 
-	for _, cookie := range s.client.Jar.Cookies(req.URL) {
+	for _, cookie := range s.client.GetCookies(req.URL) {
 		if cookie.Name == "ct0" {
 			req.Header.Set("X-CSRF-Token", cookie.Value)
 			break
