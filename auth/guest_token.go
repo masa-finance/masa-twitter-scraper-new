@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/imperatrona/twitter-scraper/httpwrap"
+	"github.com/masa-finance/twitter-scraper/httpwrap"
 )
 
 // GetGuestToken from Twitter API

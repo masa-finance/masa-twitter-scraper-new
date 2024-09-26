@@ -11,8 +11,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/imperatrona/twitter-scraper/httpwrap"
-	"github.com/imperatrona/twitter-scraper/types"
+	"github.com/masa-finance/twitter-scraper/httpwrap"
+	"github.com/masa-finance/twitter-scraper/types"
 )
 
 const (

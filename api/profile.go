@@ -6,10 +6,10 @@ import (
 	"strings"
 	"sync"
 
-	twitterscraper "github.com/imperatrona/twitter-scraper"
-	"github.com/imperatrona/twitter-scraper/config"
-	"github.com/imperatrona/twitter-scraper/features"
-	"github.com/imperatrona/twitter-scraper/types"
+	twitterscraper "github.com/masa-finance/twitter-scraper"
+	"github.com/masa-finance/twitter-scraper/config"
+	"github.com/masa-finance/twitter-scraper/features"
+	"github.com/masa-finance/twitter-scraper/types"
 )
 
 // Global cache for user IDs

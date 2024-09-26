@@ -1,4 +1,4 @@
-module github.com/imperatrona/twitter-scraper
+module github.com/masa-finance/twitter-scraper
 
 go 1.23
 

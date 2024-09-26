@@ -9,7 +9,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/imperatrona/twitter-scraper/auth"
+	"github.com/masa-finance/twitter-scraper/auth"
 )
 
 // IsLoggedIn check if scraper logged in

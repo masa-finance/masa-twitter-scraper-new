@@ -4,8 +4,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/imperatrona/twitter-scraper/auth"
-	"github.com/imperatrona/twitter-scraper/httpwrap"
+	"github.com/masa-finance/twitter-scraper/auth"
+	"github.com/masa-finance/twitter-scraper/httpwrap"
 )
 
 // Scraper object
